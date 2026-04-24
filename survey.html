@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>角色评分</title>
+  <script src="https://unpkg.com/jspsych@8.2.3"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-button-response@2.1.0"></script>
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+  <link href="https://unpkg.com/jspsych@8.2.3/css/jspsych.css" rel="stylesheet">
+  <style>
+    .character-box {
+      margin: 45px auto;
+      max-width: 600px;
+      text-align: center;
+      padding: 0 10px;
+    }
+    .score-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    .score-btn {
+      width: 40px; height: 40px; font-size: 16px;
+      border: 1px solid #333; background: #f8f8f8;
+      border-radius: 4px; cursor: pointer;
+    }
+    .score-btn.selected {
+      background: #4285F4; color: white;
+    }
+    h3 { font-size: 18px; margin-bottom: 10px; }
+    .question {
+      font-size: 16px;
+      font-weight: bold;
+      margin: 12px 0 6px 0;
+      color: #222;
+    }
+    .jspsych-btn {
+      font-size: 18px; padding: 12px 30px; margin-top: 20px;
+    }
+  </style>
+</head>
+<body></body>
+
+<script>
+const jsPsych = initJsPsych();
+
+// 转义 HTML
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;")
+    .replace(/,/g, "&#44;");
+}
+
+// 加载 CSV
+async function loadCSV() {
+  const res = await fetch("https://raw.githubusercontent.com/Nan4sh7/Characters/refs/heads/main/characters.csv");
+  const text = await res.text();
+  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+  return parsed.data;
+}
+
+// 随机抽取
+function randomPick(arr, n) {
+  return [...arr].sort(() => Math.random() - 0.5).slice(0, n);
+}
+
+// 提交数据
+async function submitResults(ratings) {
+  const YOUR_URL = "https://script.google.com/macros/s/AKfycbwKdQ28LvB75fdjJAQFOATqpdn2ruNRkWAqIF-2_3NzMW16LFN3vhbstY28ETlo3wOd/exec";
+  await fetch(YOUR_URL, {
+    method: "POST",
+    body: JSON.stringify({ ratings }),
+    mode: "no-cors"
+  });
+}
+
+// 主程序
+async function runExperiment() {
+  const data = await loadCSV();
+  const selected = randomPick(data, 5);
+
+  const questions = [
+    "I can easily picture this character’s appearance and image. I can clearly remember his/her classic looks and styling.",
+    "I can clearly recall this character’s story and experience. ",
+    "I find this character likable. I appreciate the character’s behavior and personality.",
+    "I think the character’s identity and background make her distinctive and hold my attention.",
+    "I am interested in this character. The plotline arouses my curiosity.",
+    "I find the character meaningful.",
+    "I think I have a good understanding of the character’s life choices.",
+    "I can empathize with the character’s encounters and fate and understand reasons why he/she does what he/she does.",
+    "This character has a coherent personality.",
+    "This character behaves consistently across situations.",
+    "The character’s development does not feel abrupt."
+  ];
+  // ====================================================
+
+  let html = `<h2>Character Perception and Evaluation Survey</h2>`;
+  html += `<p style="font-size:17px; text-align:center; margin-bottom:20px;">
+        Please rate your level of agreement with each statement on a scale from 0 to 10, where 0 means "strongly disagree" and 10 means "strongly agree".
+        </p>`
+
+    selected.forEach((item, charIdx) => {
+    const p = escapeHtml(item.mbti_profile);
+    const t = escapeHtml(item.Title);
+    const plot = escapeHtml(item.Plot);
+
+    html += `
+    <div class="character-box">
+      <h3>${p} from <i>${t}</i></h3>
+      <p style="font-size:16px; line-height:1.6; margin:10px 0; text-align:left;">${plot}</p>
+    `;
+
+    questions.forEach((q, qIdx) => {
+      html += `
+        <div class="question">${q}</div>
+        <div class="score-buttons">
+          ${Array.from({length:11}, (_,n) => `
+            <button class="score-btn" 
+              data-char="${charIdx}" 
+              data-q="${qIdx}" 
+              data-score="${n}" 
+              onclick="pick(this)">${n}</button>
+          `).join('')}
+        </div>
+      `;
+    });
+
+    html += `</div>`;
+  });
+
+  html += `<br><p style="text-align:center;">Please complete all ratings before submitting.</p>`;
+
+  // 评分存储：scores[角色序号][题目序号] = 分数
+  window.scores = Array(selected.length).fill(null).map(() => [null,null,null,null,null,null,null,null,null,null,null]);
+  window.pick = btn => {
+    const charIdx = btn.dataset.char;
+    const qIdx = btn.dataset.q;
+    const score = +btn.dataset.score;
+    
+    scores[charIdx][qIdx] = score;
+    
+    // 清除同角色同题目的选中状态
+    document.querySelectorAll(`.score-btn[data-char="${charIdx}"][data-q="${qIdx}"]`)
+            .forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+  };
+
+  const trial = {
+    type: jsPsychHtmlButtonResponse,
+    stimulus: html,
+    choices: ["Submit"],
+    on_finish: async (data) => {
+      // 检查是否全部答完
+      const allAnswered = scores.every(row => row.every(s => s !== null));
+      if (!allAnswered) {
+        alert("Please complete all ratings for each character!");
+        location.reload();
+        return;
+      }
+
+      // 整理结果
+      const results = selected.map((role, i) => ({
+        mbti_profile: role.mbti_profile,
+        Title: role.Title,
+        mem_image: scores[i][0],
+        mem_plot: scores[i][1],
+        likable: scores[i][2],
+        impressive: scores[i][3],
+        interested: scores[i][4],
+        meaningful: scores[i][5],
+        understanding: scores[i][6],
+        emphasis: scores[i][7],
+        coherent: scores[i][8],
+        consistent: scores[i][9],
+        good_dev: scores[i][10]
+      }));
+
+      await submitResults(results);
+      alert("Thank you for your participation! Your responses have been submitted.");
+    }
+  };
+
+  jsPsych.run([trial]);
+}
+
+runExperiment();
+</script>
+</html>
